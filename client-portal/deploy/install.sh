@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
-# Installe ou met à jour le portail client sur un serveur Ubuntu/Debian (par exemple un VPS OVH).
-# Usage : sudo bash deploy/install.sh portail.mon-domaine.com ["Nom du cabinet"]
+# Installe ou met à jour le portail client.
+#   Serveur dédié au portail (Ubuntu/Debian, par exemple un VPS OVH) :
+#     sudo bash deploy/install.sh portail.mon-domaine.com ["Nom du cabinet"]
+#   Serveur géré par Plesk (le site existant n'est pas touché, Plesk sert le HTTPS) :
+#     sudo bash deploy/install.sh --plesk portail.mon-domaine.com ["Nom du cabinet"]
 # Relancer le script avec une nouvelle version du site la met à jour sans toucher aux données.
 set -euo pipefail
 
+MODE=caddy
+if [[ ${1:-} == --plesk ]]; then
+  MODE=plesk
+  shift
+fi
 DOMAIN="${1:-}"
 SITE_NAME="${2:-Espace client}"
 APP_DIR=/opt/portail-client
@@ -13,6 +21,7 @@ ENV_FILE=/etc/portail-client.env
 CADDYFILE=/etc/caddy/Caddyfile
 APP_USER=portail
 PORT=3000
+[[ $MODE == plesk ]] && PORT=3100
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 die() {
@@ -22,9 +31,15 @@ die() {
 
 [[ $EUID -eq 0 ]] || die "lancez ce script avec sudo."
 [[ $DOMAIN =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$ ]] ||
-  die 'usage : sudo bash deploy/install.sh portail.mon-domaine.com ["Nom du cabinet"]'
+  die 'usage : sudo bash deploy/install.sh [--plesk] portail.mon-domaine.com ["Nom du cabinet"]'
 [[ $SITE_NAME =~ ^[^\"\\$\`]{1,100}$ ]] || die 'le nom du cabinet ne doit pas contenir de guillemets, $, ` ou \.'
-command -v apt-get >/dev/null || die "ce script fonctionne sur Ubuntu ou Debian."
+if [[ $MODE == caddy ]]; then
+  # Never install a second web server next to Plesk: it would take ports 80/443 from the existing sites.
+  if command -v plesk >/dev/null || [[ -d /usr/local/psa ]]; then
+    die "Plesk est installé sur ce serveur : relancez avec --plesk pour ne pas toucher à vos sites existants."
+  fi
+  command -v apt-get >/dev/null || die "ce script fonctionne sur Ubuntu ou Debian."
+fi
 command -v systemctl >/dev/null || die "systemd est nécessaire."
 [[ -f $SRC_DIR/src/server.js ]] || die "lancez le script depuis le dossier client-portal décompressé."
 [[ $SRC_DIR != "$APP_DIR" ]] || die "lancez le script depuis le dossier décompressé, pas depuis $APP_DIR."
@@ -34,23 +49,34 @@ command -v systemctl >/dev/null || die "systemd est nécessaire."
 SERVER_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}' || true)"
 DNS_IP="$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk 'NR == 1 {print $1}' || true)"
 
+if [[ $MODE == plesk ]]; then
+  STEP1="utiliser Node.js 22 de Plesk s'il est installé (sinon l'installer) ;"
+  STEP4="ne rien changer à Plesk ni à vos sites : vous relierez https://$DOMAIN au portail
+     dans Plesk à la fin (instructions affichées) ;"
+else
+  STEP1="installer Node.js 22 (si absent ou trop ancien) et Caddy (serveur web HTTPS) ;"
+  STEP4="remplacer $CADDYFILE pour servir https://$DOMAIN
+     (l'ancien fichier est sauvegardé à côté s'il est différent) ;"
+fi
+
 cat <<EOF
 
 Installation du portail client pour https://$DOMAIN
 
 Ce script va :
-  1. installer Node.js 22 (si absent ou trop ancien) et Caddy (serveur web HTTPS) ;
+  1. $STEP1
   2. copier le site dans $APP_DIR (données dans $DATA_DIR, jamais effacées) ;
-  3. créer le service « portail-client », démarré automatiquement avec le serveur ;
-  4. remplacer $CADDYFILE pour servir https://$DOMAIN
-     (l'ancien fichier est sauvegardé à côté s'il est différent) ;
+  3. créer le service « portail-client » (port local $PORT), démarré automatiquement avec le serveur ;
+  4. $STEP4
   5. programmer une sauvegarde quotidienne de la base (14 jours) dans $BACKUP_DIR,
      et, lors d'une mise à jour, sauvegarder la base avant de redémarrer le site ;
   6. lors de la première installation, créer le compte administrateur « admin ».
 
 EOF
 
-if [[ -z $DNS_IP ]]; then
+if [[ $MODE == plesk ]]; then
+  : # Plesk creates the DNS entry together with the subdomain.
+elif [[ -z $DNS_IP ]]; then
   echo "Attention : $DOMAIN ne pointe encore vers aucune adresse."
   echo "Ajoutez l'entrée DNS (type A → ${SERVER_IP:-adresse IP de ce serveur}) chez OVH, sinon le certificat HTTPS ne pourra pas être obtenu."
   echo
@@ -66,24 +92,40 @@ read -r -p "Continuer ? [o/N] " answer
 # ---------- Node.js ----------
 
 node_ok() {
-  command -v node >/dev/null &&
-    node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 13) ? 0 : 1)'
+  [[ -n $1 && -x $1 ]] &&
+    "$1" -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 13) ? 0 : 1)'
 }
 
+if command -v ss >/dev/null && ss -ltnH "sport = :$PORT" | grep -q . && ! systemctl is-active --quiet portail-client; then
+  die "le port $PORT est déjà utilisé par un autre programme sur ce serveur."
+fi
+
+NODE_BIN=""
+# Node.js from the Plesk extension (newest first), then the system one.
+for candidate in $(ls -d /opt/plesk/node/*/bin/node 2>/dev/null | sort -rV) "$(command -v node || true)"; do
+  if node_ok "$candidate"; then
+    NODE_BIN="$candidate"
+    break
+  fi
+done
+
 export DEBIAN_FRONTEND=noninteractive
-if ! node_ok; then
+if [[ -z $NODE_BIN ]]; then
+  command -v apt-get >/dev/null ||
+    die "Node.js 22.13 ou plus récent est nécessaire. Dans Plesk : Extensions → Node.js, installez la version 22, puis relancez."
   echo "→ Installation de Node.js 22"
   apt-get update
   apt-get install -y ca-certificates curl gnupg
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get install -y nodejs
+  node_ok "$(command -v node || true)" || die "Node.js 22.13 ou plus récent n'a pas pu être installé."
+  NODE_BIN="$(command -v node)"
 fi
-node_ok || die "Node.js 22.13 ou plus récent n'a pas pu être installé."
-NODE_BIN="$(command -v node)"
+echo "→ Node.js utilisé : $NODE_BIN ($("$NODE_BIN" --version))"
 
 # ---------- Caddy ----------
 
-if ! command -v caddy >/dev/null; then
+if [[ $MODE == caddy ]] && ! command -v caddy >/dev/null; then
   echo "→ Installation de Caddy"
   apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl gnupg
   curl -1sLf https://dl.cloudsmith.io/public/caddy/stable/gpg.key |
@@ -211,6 +253,7 @@ curl -fsS -o /dev/null "http://127.0.0.1:$PORT/connexion" ||
 
 # ---------- HTTPS ----------
 
+if [[ $MODE == caddy ]]; then
 DESIRED_CADDYFILE="$DOMAIN {
 	encode zstd gzip
 	reverse_proxy 127.0.0.1:$PORT
@@ -229,15 +272,38 @@ if command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then
   ufw allow 80/tcp >/dev/null
   ufw allow 443/tcp >/dev/null
 fi
+fi
 
 # ---------- Résumé ----------
 
-cat <<EOF
+if [[ $MODE == plesk ]]; then
+  cat <<EOF
+
+✔ Le portail tourne sur ce serveur (port local $PORT). Dernière étape, dans Plesk :
+
+  1. Sites Web & Domaines → Ajouter un sous-domaine : $DOMAIN
+  2. Sur ce sous-domaine : SSL/TLS → Let's Encrypt → Installer (avec la redirection HTTP → HTTPS).
+  3. Paramètres Apache & nginx : décochez « Mode proxy », puis collez dans
+     « Directives supplémentaires nginx » :
+
+location ~ ^/ {
+    proxy_pass http://127.0.0.1:$PORT;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+}
+
+  4. Enregistrez, puis ouvrez https://$DOMAIN
+
+EOF
+else
+  cat <<EOF
 
 ✔ Portail client installé : https://$DOMAIN
   (le certificat HTTPS est obtenu automatiquement, cela peut prendre une minute)
 
 EOF
+fi
 if [[ -n $ADMIN_OUTPUT ]]; then
   echo "$ADMIN_OUTPUT"
   echo

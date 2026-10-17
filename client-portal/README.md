@@ -73,6 +73,19 @@ Le script affiche ce qu'il va faire et demande confirmation. Il installe Node.js
 
 Ouvrez ensuite `https://portail.votre-domaine.com` et connectez-vous avec `admin`.
 
+### Variante : serveur géré par Plesk
+
+Si votre site actuel tourne déjà sur un serveur Plesk, le portail peut s'installer à côté, sans toucher à vos sites :
+
+1. Dans Plesk, ouvrez un terminal (**Outils & paramètres → SSH Terminal**, ou une connexion SSH en root) et lancez :
+   ```bash
+   curl -sSL https://codeload.github.com/y676d68jmb-pixel/rea/tar.gz/refs/heads/claude/client-portal-dossier-tracking-j56x3g | tar -xz --strip-components=1 --wildcards '*/client-portal'
+   cd client-portal && bash deploy/install.sh --plesk portail.votre-domaine.tn "Nom du cabinet"
+   ```
+   Le portail tourne alors en local sur le port 3100. Il utilise Node.js 22 de l'extension Plesk « Node.js » s'il est présent.
+2. Dans Plesk : **Ajouter un sous-domaine** `portail`, puis **SSL/TLS → Let's Encrypt** sur ce sous-domaine.
+3. **Paramètres Apache & nginx** du sous-domaine : décochez « Mode proxy » et collez les directives nginx affichées à la fin du script.
+
 ### Mettre à jour le site
 
 Recommencez l'étape 3 avec la nouvelle archive : le code est remplacé, les données et les comptes sont conservés.
