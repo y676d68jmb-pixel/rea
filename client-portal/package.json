@@ -1,0 +1,15 @@
+{
+  "name": "client-portal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Espace client : suivi des dossiers, factures, tâches et historique.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "create-admin": "node --disable-warning=ExperimentalWarning scripts/create-admin.js",
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.js\""
+  }
+}
