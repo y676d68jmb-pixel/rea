@@ -32,6 +32,7 @@
 }
 
 * { box-sizing: border-box; }
+form { margin: 0; }
 body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
 a { color: var(--accent); }
 h1 { font-size: 1.6rem; margin: .2em 0 .6em; }
@@ -67,7 +68,8 @@ textarea { resize: vertical; }
 button { font: inherit; font-weight: 600; padding: .55rem 1rem; border: 0; border-radius: 6px; background: var(--accent); color: var(--accent-text); cursor: pointer; align-self: flex-start; }
 button.small { padding: .35rem .7rem; font-size: .9rem; }
 button.secondary { background: var(--neutral-bg); color: var(--text); }
-button.link { background: none; color: var(--accent); padding: 0; font-weight: 400; }
+button.link { background: none; color: var(--accent); padding: 0; font-weight: 400; line-height: inherit; align-self: center; }
+.topbar nav form.inline { display: flex; }
 form.inline { display: inline; }
 .row form.inline { display: block; }
 
