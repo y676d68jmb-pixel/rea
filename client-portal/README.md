@@ -113,3 +113,8 @@ npm test
 - Notifications par e-mail ou SMS (document demandé, circuit attribué, facture émise).
 - Plusieurs utilisateurs côté cabinet, avec leurs propres droits.
 - Suivi des délais de magasinage et de restitution des conteneurs.
+
+## Crédits
+
+- Photos : Wolfgang Weiser (port de Hambourg au crépuscule) et Maksym Kaharlytskyi (quai du port de Matosinhos), sous [licence Unsplash](https://unsplash.com/license).
+- Police : [Manrope](https://github.com/sharanda/manrope), licence SIL Open Font License 1.1 (`public/fonts/OFL-manrope.txt`).

@@ -1,4 +1,4 @@
-import { html } from './http.js';
+import { SafeHtml, html } from './http.js';
 import {
   CIRCUITS,
   CT_STATUS,
@@ -45,9 +45,45 @@ function selectInput(name, options, selected, { required = true, empty: emptyLab
   </select>`;
 }
 
-function progressBar(pct) {
-  if (pct === null) return '';
-  return html`<div class="progress"><progress max="100" value="${pct}">${pct} %</progress><span>${pct} %</span></div>`;
+// ---------- Icons (inline SVG, drawn with the text colour) ----------
+
+const ICON_PATHS = {
+  anchor: 'M12 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM12 7v14M5 13H3a9 9 0 0 0 18 0h-2M8 10.5h8',
+  home: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
+  todo: 'M9.5 6H20M9.5 12H20M9.5 18H20M3.5 6l1.5 1.5L7.5 5M3.5 12l1.5 1.5L7.5 11M3.5 18l1.5 1.5L7.5 17',
+  folder: 'M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2h7.5A2.5 2.5 0 0 1 21 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5z',
+  invoice: 'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3',
+  history: 'M3.5 12a8.5 8.5 0 1 0 2.5-6M3.5 4v4h4M12 7.5V12l3 2',
+  users: 'M16 20v-1.5a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4V20M9.5 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM21 20v-1.5a4 4 0 0 0-3-3.85M15.5 4.15a3.5 3.5 0 0 1 0 6.7',
+  inbox: 'M3 13h5l1.5 3h5L16 13h5M5.5 5h13L21 13v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6z',
+  ship: 'M2.5 16.5 4.5 20h15l2-3.5zM5 16.5V12h14v4.5M8 12V8h8v4M12 4v4',
+  plane: 'M10.5 20.5 12 19l1.5 1.5v-4.2l7-2.8v-2.1l-7 1.6V6.5a1.5 1.5 0 0 0-3 0V13l-7-1.6v2.1l7 2.8z',
+  truck: 'M2.5 6h11v10h-11zM13.5 9h4l3 3.5V16h-7M7 19.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM17 19.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z',
+  box: 'M3 7.5 12 3l9 4.5v9L12 21l-9-4.5zM3 7.5l9 4.5 9-4.5M12 12v9',
+  lock: 'M6 11h12v10H6zM8.5 11V7.5a3.5 3.5 0 0 1 7 0V11',
+  logout: 'M14 4h4.5a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H14M9.5 16.5 14 12 9.5 7.5M14 12H3.5',
+  wallet: 'M3 7.5A2.5 2.5 0 0 1 5.5 5H18v3.5M3 7.5V18a2 2 0 0 0 2 2h15.5V8.5H5.5A2.5 2.5 0 0 1 3 7.5zM16.5 14.25h.01',
+  check: 'M5 12.5 9.5 17 19 7.5',
+  arrow: 'M5 12h14M13 6l6 6-6 6',
+};
+
+function icon(name, cls = 'icon') {
+  return new SafeHtml(`<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="${ICON_PATHS[name]}"/></svg>`);
+}
+
+const TRANSPORT_ICONS = { maritime: 'ship', aerien: 'plane', routier: 'truck' };
+const transportIcon = (d) => icon(TRANSPORT_ICONS[d.transport_mode] ?? 'box');
+
+/** The dossier's steps as a segmented bar, with "step x of n". */
+function stageMeter(d) {
+  if (d.hold === 'annule') return html`<p class="meter-caption"><span>Dossier annulé</span></p>`;
+  const list = stagesFor(d.direction);
+  const index = list.findIndex((s) => s.key === d.stage);
+  const done = d.stage === 'termine';
+  return html`<div class="meter" role="img" aria-label="Étape ${index + 1} sur ${list.length} : ${list[index]?.label ?? ''}">
+      ${list.map((s, k) => html`<span class="seg${k < index || done ? ' seg-done' : k === index ? ' seg-current' : ''}"></span>`)}
+    </div>
+    <p class="meter-caption"><span>Étape ${index + 1} sur ${list.length}</span><span>${progressOf(d)} %</span></p>`;
 }
 
 /** Definition list of [label, value] rows; rows with an empty value are left out. */
@@ -120,18 +156,18 @@ function invoiceTable(ctx, invoices, { admin = false } = {}) {
   if (!invoices.length) return empty('Aucune facture.');
   const today = ctx.f.today();
   const base = admin ? '/admin/factures' : '/espace/factures';
-  return html`<div class="table-wrap"><table>
+  return html`<div class="table-wrap"><table class="responsive">
     <thead><tr><th>N°</th><th>Type</th><th>Objet</th><th>Dossier</th><th>Échéance</th><th class="num">Montant</th><th>État</th></tr></thead>
     <tbody>
     ${invoices.map((inv) => {
       const st = invoiceStatus(inv, today);
       return html`<tr>
-        <td><a href="${base}/${inv.id}">${inv.number}</a></td>
-        <td>${LABELS.invoiceKind[inv.kind]}</td>
-        <td>${inv.label}</td><td>${inv.reference ?? '—'}</td>
-        <td>${ctx.f.date(inv.due_on)}</td>
-        <td class="num">${ctx.f.money(inv.amount_minor)}</td>
-        <td>${badge('inv', st.key, st.label)}${inv.deducted_in ? html`<br><small class="muted">déduite d'une facture</small>` : ''}</td>
+        <td data-label="N°"><a href="${base}/${inv.id}">${inv.number}</a></td>
+        <td data-label="Type">${LABELS.invoiceKind[inv.kind]}</td>
+        <td data-label="Objet">${inv.label}</td><td data-label="Dossier">${inv.reference ?? '—'}</td>
+        <td data-label="Échéance">${ctx.f.date(inv.due_on)}</td>
+        <td data-label="Montant" class="num">${ctx.f.money(inv.amount_minor)}</td>
+        <td data-label="État">${badge('inv', st.key, st.label)}${inv.deducted_in ? html`<br><small class="muted">déduite d'une facture</small>` : ''}</td>
       </tr>`;
     })}
     </tbody></table></div>`;
@@ -234,10 +270,13 @@ function dossierCards(ctx, dossiers, hrefFor) {
   return html`<div class="grid">
     ${dossiers.map(
       (d) => html`<a class="card dossier" href="${hrefFor(d)}">
-        <div class="card-head"><span class="muted">${d.reference}</span>${dirBadge(d.direction)}</div>
+        <div class="card-head">
+          <span class="transport">${transportIcon(d)}</span>
+          <span class="ref">${d.reference}</span>${dirBadge(d.direction)}
+        </div>
         <h3>${d.title}</h3>
         <p class="stage-name">${LABELS.stage[d.stage]}</p>
-        ${progressBar(progressOf(d))}
+        ${stageMeter(d)}
         ${dossierStatusLine(d)}
         <small class="muted">Mis à jour le ${ctx.f.dateTime(d.updated_at)}</small>
       </a>`,
@@ -318,41 +357,53 @@ function documentGroups(ctx, dossier, documents, { back }) {
 
 export function layout(ctx, title, body) {
   const { user, csrf, flash, path } = ctx;
-  const link = (href, label, match = (p) => p === href) =>
-    html`<a href="${href}" ${path && match(path) ? html`aria-current="page"` : ''}>${label}</a>`;
-  const nav = !user
+  const link = (href, iconName, label, match = (p) => p === href, count = 0) =>
+    html`<a href="${href}" ${path && match(path) ? html`aria-current="page"` : ''}>${icon(iconName)}<span>${label}</span>${
+      count ? html`<span class="count" aria-label="${count} à faire">${count}</span>` : ''}</a>`;
+  const links = !user
     ? ''
     : user.role === 'admin'
-      ? html`${link('/admin', 'Clients', (p) => p === '/admin' || p.startsWith('/admin/clients'))}
-          ${link('/admin/dossiers', 'Dossiers', (p) => p.startsWith('/admin/dossiers'))}
-          ${link('/admin/taches', 'À traiter')}`
-      : html`${link('/espace', 'Tableau de bord')}
-          ${link('/espace/a-faire', ctx.todoCount ? `À faire (${ctx.todoCount})` : 'À faire')}
-          ${link('/espace/dossiers', 'Dossiers', (p) => p.startsWith('/espace/dossiers'))}
-          ${link('/espace/factures', 'Factures', (p) => p.startsWith('/espace/factures'))}
-          ${link('/espace/historique', 'Historique')}`;
+      ? html`${link('/admin', 'users', 'Clients', (p) => p === '/admin' || p.startsWith('/admin/clients') || p.startsWith('/admin/factures'))}
+          ${link('/admin/dossiers', 'folder', 'Dossiers', (p) => p.startsWith('/admin/dossiers'))}
+          ${link('/admin/taches', 'inbox', 'À traiter')}`
+      : html`${link('/espace', 'home', 'Accueil')}
+          ${link('/espace/a-faire', 'todo', 'À faire', undefined, ctx.todoCount)}
+          ${link('/espace/dossiers', 'folder', 'Dossiers', (p) => p.startsWith('/espace/dossiers'))}
+          ${link('/espace/factures', 'invoice', 'Factures', (p) => p.startsWith('/espace/factures'))}
+          ${link('/espace/historique', 'history', 'Historique')}`;
+  const initials = user ? user.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase() : '';
 
   return html`<!doctype html>
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b2a5b">
   <title>${title} · ${ctx.siteName}</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body class="${user ? 'app' : 'public'}">
   <header class="topbar">
-    <a class="brand" href="/">${ctx.siteName}</a>
-    ${user
-      ? html`<nav>${nav}${link('/mot-de-passe', 'Mot de passe')}
-        <form method="post" action="/deconnexion" class="inline">${csrfField(csrf)}<button class="link">Déconnexion</button></form></nav>`
-      : ''}
+    <div class="topbar-inner">
+      <a class="brand" href="/"><span class="brand-mark">${icon('anchor')}</span><span class="brand-name">${ctx.siteName}</span></a>
+      ${user
+        ? html`<nav class="mainnav" aria-label="Navigation principale">${links}</nav>
+          <details class="account">
+            <summary aria-label="Mon compte"><span class="avatar">${initials}</span><span class="account-name">${user.name}</span></summary>
+            <div class="account-menu">
+              <p><strong>${user.name}</strong><br><small>${user.login}</small></p>
+              <a href="/mot-de-passe">${icon('lock')}<span>Mot de passe</span></a>
+              <form method="post" action="/deconnexion">${csrfField(csrf)}<button class="menu-item">${icon('logout')}<span>Déconnexion</span></button></form>
+            </div>
+          </details>`
+        : ''}
+    </div>
   </header>
   <main>
-    ${user ? html`<p class="whoami">Connecté : <strong>${user.name}</strong> (${user.login})</p>` : ''}
     ${(flash ?? []).map((f) => html`<div class="flash flash-${f.type}" role="status">${f.text}</div>`)}
     ${body}
   </main>
+  ${user ? html`<nav class="tabbar" aria-label="Navigation">${links}</nav>` : ''}
 </body>
 </html>`;
 }
@@ -363,15 +414,31 @@ export function loginPage(ctx, { error, login = '' } = {}) {
   return layout(
     ctx,
     'Connexion',
-    html`<section class="card narrow">
-      <h1>Espace client</h1>
-      <p>Suivez vos dossiers de dédouanement, vos documents et vos factures. Connectez-vous avec l'identifiant et le mot de passe fournis par le cabinet.</p>
-      ${error ? html`<div class="flash flash-error" role="alert">${error}</div>` : ''}
-      <form method="post" action="/connexion" class="stack">
-        <label>Identifiant<input name="login" value="${login}" autocomplete="username" required autofocus></label>
-        <label>Mot de passe<input type="password" name="password" autocomplete="current-password" required></label>
-        <button>Se connecter</button>
-      </form>
+    html`<section class="login">
+      <div class="login-visual">
+        <div class="login-copy">
+          <p class="eyebrow">Espace client · ${ctx.siteName}</p>
+          <h1>Vos dédouanements, suivis en temps réel.</h1>
+          <p>Avancement de chaque dossier import et export, documents à fournir, droits et taxes, factures : tout au même endroit.</p>
+          <ul class="login-points">
+            <li>${icon('check')}Les étapes de la douane, au fil de l'eau</li>
+            <li>${icon('check')}Les documents attendus et ceux que nous vous remettons</li>
+            <li>${icon('check')}Vos factures, provisions et débours détaillés</li>
+          </ul>
+        </div>
+      </div>
+      <div class="login-panel">
+        <div class="card login-card">
+          <h2>Connexion</h2>
+          <p class="muted">Utilisez l'identifiant et le mot de passe fournis par le cabinet.</p>
+          ${error ? html`<div class="flash flash-error" role="alert">${error}</div>` : ''}
+          <form method="post" action="/connexion" class="stack">
+            <label>Identifiant<input name="login" value="${login}" autocomplete="username" placeholder="CL-0001" required autofocus></label>
+            <label>Mot de passe<input type="password" name="password" autocomplete="current-password" required></label>
+            <button class="wide">Se connecter</button>
+          </form>
+        </div>
+      </div>
     </section>`,
   );
 }
@@ -402,22 +469,33 @@ export function errorPage(ctx, status, message) {
 // ---------- Client pages ----------
 
 export function clientDashboard(ctx, { todo, openDossiers, closedCount, unpaidTotal, overdueCount, events }) {
+  const firstName = ctx.user.name.split(/\s+/)[0];
   return layout(
     ctx,
     'Tableau de bord',
-    html`<h1>Bonjour ${ctx.user.name}</h1>
-    ${todo.length
-      ? html`<section class="card attention"><h2>À faire (${todo.length})</h2>${todoList(ctx, todo, '/espace')}</section>`
-      : html`<p class="all-good">Rien à faire de votre côté pour le moment.</p>`}
-    <h2>Dossiers en cours</h2>
+    html`<section class="hero">
+      <div class="hero-inner">
+        <p class="eyebrow">${ctx.f.date(ctx.f.today())}</p>
+        <h1>Bonjour ${firstName}</h1>
+        <p>${todo.length
+          ? `${plural(todo.length, 'point demande', 'points demandent')} votre attention.`
+          : 'Rien à faire de votre côté pour le moment : nous nous occupons du reste.'}</p>
+      </div>
+    </section>
+    <div class="kpis">
+      <a class="kpi${todo.length ? ' kpi-alert' : ''}" href="/espace/a-faire">
+        <span class="kpi-icon">${icon('todo')}</span><span class="kpi-value">${todo.length}</span><span class="kpi-label">À faire</span></a>
+      <a class="kpi" href="/espace/dossiers">
+        <span class="kpi-icon">${icon('folder')}</span><span class="kpi-value">${openDossiers.length}</span><span class="kpi-label">Dossiers en cours</span></a>
+      <a class="kpi" href="/espace/factures">
+        <span class="kpi-icon">${icon('wallet')}</span><span class="kpi-value">${ctx.f.money(unpaidTotal)}</span>
+        <span class="kpi-label">Reste à payer${overdueCount ? html` · <span class="late">${plural(overdueCount, 'en retard', 'en retard')}</span>` : ''}</span></a>
+    </div>
+    ${todo.length ? html`<section class="card attention"><h2>À faire (${todo.length})</h2>${todoList(ctx, todo, '/espace')}</section>` : ''}
+    <div class="section-head"><h2>Dossiers en cours</h2>${closedCount ? html`<a href="/espace/dossiers">${plural(closedCount, 'dossier terminé', 'dossiers terminés')} ${icon('arrow')}</a>` : ''}</div>
     ${dossierCards(ctx, openDossiers, (d) => `/espace/dossiers/${d.id}`)}
-    ${closedCount ? html`<p><a href="/espace/dossiers">Voir aussi ${plural(closedCount, 'dossier terminé', 'dossiers terminés')} →</a></p>` : ''}
-    <h2>Factures</h2>
-    <p>${unpaidTotal ? html`Reste à payer : <strong>${ctx.f.money(unpaidTotal)}</strong>${overdueCount ? html` <span class="late">(${plural(overdueCount, 'en retard', 'en retard')})</span>` : ''}` : 'Tout est réglé.'}
-      · <a href="/espace/factures">Voir les factures</a></p>
-    <h2>Dernières nouvelles</h2>
-    ${timeline(ctx, events, { showDossier: true })}
-    <p><a href="/espace/historique">Voir tout l'historique →</a></p>`,
+    <div class="section-head"><h2>Dernières nouvelles</h2><a href="/espace/historique">Tout l'historique ${icon('arrow')}</a></div>
+    <section class="card">${timeline(ctx, events, { showDossier: true })}</section>`,
   );
 }
 
@@ -441,15 +519,20 @@ export function clientDossierPage(ctx, { dossier: d, stages, documents, invoices
   return layout(
     ctx,
     d.reference,
-    html`<p><a href="/espace">← Tableau de bord</a></p>
-    <section class="card">
-      <div class="card-head"><span class="muted">${d.reference}</span>${dirBadge(d.direction)}</div>
+    html`<p class="back"><a href="/espace">← Tableau de bord</a></p>
+    <section class="card dossier-head">
+      <div class="card-head">
+        <span class="transport transport-lg">${transportIcon(d)}</span>
+        <span class="ref">${d.reference}${d.client_reference ? html` · votre réf. ${d.client_reference}` : ''}</span>${dirBadge(d.direction)}
+      </div>
       <h1>${d.title}</h1>
       ${holdBanner(d)}
       ${ctBanner(d)}
-      <p class="stage-name">${stage?.label}</p>
-      ${progressBar(progressOf(d))}
-      ${d.hold === 'annule' ? '' : html`<p>${stage ? stageExplain(stage, d.direction) : ''}</p>${waitingLine(d)}`}
+      <div class="now">
+        <p class="stage-name">${stage?.label}</p>
+        ${stageMeter(d)}
+        ${d.hold === 'annule' ? '' : html`<p>${stage ? stageExplain(stage, d.direction) : ''}</p>${waitingLine(d)}`}
+      </div>
     </section>
 
     ${todoDocs.length
@@ -598,15 +681,15 @@ export function adminHomePage(ctx, { clients }) {
     html`<h1>Clients</h1>
     ${!clients.length
       ? empty('Aucun client pour le moment.')
-      : html`<div class="table-wrap"><table>
+      : html`<div class="table-wrap"><table class="responsive">
         <thead><tr><th>Identifiant</th><th>Client</th><th class="num">Dossiers en cours</th><th class="num">Bloqués / en attente</th><th class="num">Documents à vérifier</th><th class="num">Demandes</th><th class="num">Reste à payer</th><th>Compte</th></tr></thead>
         <tbody>${clients.map(
           (c) => html`<tr>
-            <td><a href="/admin/clients/${c.id}">${c.login}</a></td><td>${c.name}${c.company ? html`<br><small class="muted">${c.company}</small>` : ''}</td>
-            <td class="num">${c.open_dossiers}</td><td class="num">${c.held_dossiers || ''}</td>
-            <td class="num">${c.docs_to_check || ''}</td><td class="num">${c.open_tasks || ''}</td>
-            <td class="num">${ctx.f.money(c.unpaid)}</td>
-            <td>${c.active ? badge('account', 'actif', 'Actif') : badge('account', 'inactif', 'Désactivé')}</td>
+            <td data-label="Identifiant"><a href="/admin/clients/${c.id}">${c.login}</a></td><td data-label="Client">${c.name}${c.company ? html`<br><small class="muted">${c.company}</small>` : ''}</td>
+            <td data-label="Dossiers en cours" class="num">${c.open_dossiers}</td><td data-label="Bloqués / en attente" class="num">${c.held_dossiers || '—'}</td>
+            <td data-label="Documents à vérifier" class="num">${c.docs_to_check || '—'}</td><td data-label="Demandes" class="num">${c.open_tasks || '—'}</td>
+            <td data-label="Reste à payer" class="num">${ctx.f.money(c.unpaid)}</td>
+            <td data-label="Compte">${c.active ? badge('account', 'actif', 'Actif') : badge('account', 'inactif', 'Désactivé')}</td>
           </tr>`,
         )}</tbody></table></div>`}
     <details class="card" ${clients.length ? '' : html`open`}>
@@ -630,16 +713,16 @@ export function adminHomePage(ctx, { clients }) {
 
 function adminDossierTable(ctx, dossiers, { showClient = true } = {}) {
   if (!dossiers.length) return empty('Aucun dossier.');
-  return html`<div class="table-wrap"><table>
+  return html`<div class="table-wrap"><table class="responsive">
     <thead><tr><th>Dossier</th>${showClient ? html`<th>Client</th>` : ''}<th>Étape</th><th>Situation</th><th class="num">Docs manquants</th><th class="num">À vérifier</th><th>Mis à jour</th></tr></thead>
     <tbody>${dossiers.map(
       (d) => html`<tr>
-        <td><a href="/admin/dossiers/${d.id}">${d.reference}</a> ${dirBadge(d.direction)}<br><small class="muted">${d.title}</small></td>
-        ${showClient ? html`<td><a href="/admin/clients/${d.client_id}">${d.client_name}</a></td>` : ''}
-        <td>${LABELS.stage[d.stage]}${d.circuit ? html` ${badge('circuit', d.circuit, LABELS.circuit[d.circuit])}` : ''}</td>
-        <td>${d.hold ? badge('hold', d.hold, LABELS.hold[d.hold]) : ''}</td>
-        <td class="num">${d.missing_docs || ''}</td><td class="num">${d.docs_to_check || ''}</td>
-        <td>${ctx.f.dateTime(d.updated_at)}</td>
+        <td data-label="Dossier"><span class="cell-title"><span class="transport">${transportIcon(d)}</span><a href="/admin/dossiers/${d.id}">${d.reference}</a> ${dirBadge(d.direction)}</span><small class="muted">${d.title}</small></td>
+        ${showClient ? html`<td data-label="Client"><a href="/admin/clients/${d.client_id}">${d.client_name}</a></td>` : ''}
+        <td data-label="Étape">${LABELS.stage[d.stage]}${d.circuit ? html` ${badge('circuit', d.circuit, LABELS.circuit[d.circuit])}` : ''}</td>
+        <td data-label="Situation">${d.hold ? badge('hold', d.hold, LABELS.hold[d.hold]) : '—'}</td>
+        <td data-label="Docs manquants" class="num">${d.missing_docs || '—'}</td><td data-label="À vérifier" class="num">${d.docs_to_check || '—'}</td>
+        <td data-label="Mis à jour">${ctx.f.dateTime(d.updated_at)}</td>
       </tr>`,
     )}</tbody></table></div>`;
 }
@@ -794,18 +877,23 @@ export function adminDossierPage(ctx, { dossier: d, client, stages, documents, i
   return layout(
     ctx,
     d.reference,
-    html`<p><a href="/admin/clients/${client.id}">← ${client.name}</a> · <a href="/admin/dossiers">Tous les dossiers</a></p>
-    <section class="card">
-      <div class="card-head"><span class="muted">${d.reference}</span>${dirBadge(d.direction)}</div>
+    html`<p class="back"><a href="/admin/clients/${client.id}">← ${client.name}</a> · <a href="/admin/dossiers">Tous les dossiers</a></p>
+    <section class="card dossier-head">
+      <div class="card-head">
+        <span class="transport transport-lg">${transportIcon(d)}</span>
+        <span class="ref">${d.reference}${d.client_reference ? html` · réf. client ${d.client_reference}` : ''}</span>${dirBadge(d.direction)}
+      </div>
       <h1>${d.title}</h1>
       ${holdBanner(d)}
       ${ctBanner(d)}
       <p class="stage-name">${LABELS.stage[d.stage]}</p>
-      ${progressBar(progressOf(d))}
+      ${stageMeter(d)}
       ${waitingLine(d)}
       ${d.missing_docs ? html`<p class="status status-todo">${plural(d.missing_docs, 'document manquant', 'documents manquants')} chez le client</p>` : ''}
     </section>
 
+    <div class="columns">
+    <aside class="col-side">
     <section class="card">
       <h2>Étape</h2>
       ${next
@@ -843,6 +931,8 @@ export function adminDossierPage(ctx, { dossier: d, client, stages, documents, i
       </form>
     </section>
 
+    </aside>
+    <div class="col-main">
     <section class="card">
       <h2>Documents</h2>
       ${groups.map(([responsible, title]) => {
@@ -959,7 +1049,9 @@ export function adminDossierPage(ctx, { dossier: d, client, stages, documents, i
     </details>
 
     <h2>Historique</h2>
-    ${timeline(ctx, events)}`,
+    <section class="card">${timeline(ctx, events)}</section>
+    </div>
+    </div>`,
   );
 }
 

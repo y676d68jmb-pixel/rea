@@ -136,7 +136,7 @@ describe('portail de dédouanement', () => {
     assert.match(page.body, /dans le futur/);
 
     const client = await aliceBrowser.get(`/espace/dossiers/${importId}`);
-    assert.match(client.body, /<progress max="100" value="60">/);
+    assert.match(client.body, /aria-label="Étape 7 sur 12 : Contrôle de la douane"/);
     assert.match(client.body, /Étape franchie : Contrôle de la douane\. Déclaration acceptée/);
     assert.match(client.body, /step step-current" aria-current="step">\s*<span class="step-label">Contrôle de la douane<\/span>\s*<span class="step-date">16 oct\. 2026/);
     // A skipped step shows as done, without a date.

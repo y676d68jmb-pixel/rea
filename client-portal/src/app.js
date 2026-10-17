@@ -18,10 +18,18 @@ import * as views from './views.js';
 
 const SESSION_COOKIE = 'sid';
 const SESSION_HOURS = 12;
-const DEFAULT_STYLESHEET_URL = new URL('../public/style.css', import.meta.url);
+/** Files served under /static/: published name → [file in public/, content type]. */
+const ASSETS = {
+  'style.css': ['style.css', 'text/css; charset=utf-8'],
+  'manrope.woff2': ['fonts/manrope.woff2', 'font/woff2'],
+  'port-crepuscule.jpg': ['img/port-crepuscule.jpg', 'image/jpeg'],
+  'quai-grue.jpg': ['img/quai-grue.jpg', 'image/jpeg'],
+};
+const loadAssets = () =>
+  Object.fromEntries(Object.entries(ASSETS).map(([name, [file]]) => [name, readFileSync(new URL(`../public/${file}`, import.meta.url))]));
 
 const SECURITY_HEADERS = {
-  'Content-Security-Policy': "default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+  'Content-Security-Policy': "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'same-origin',
@@ -37,7 +45,7 @@ export function createApp({
   currency = 'TND',
   timeZone = 'Africa/Tunis',
   now = () => new Date(),
-  stylesheet = readFileSync(DEFAULT_STYLESHEET_URL),
+  assets = loadAssets(),
 }) {
   const f = createFormatters({ currency, timeZone, now });
   const nowIso = () => now().toISOString();
@@ -113,9 +121,11 @@ export function createApp({
     return redirect(ctx.res, ctx.user.role === 'admin' ? '/admin' : '/espace');
   });
 
-  router.get('/static/style.css', (ctx) => {
-    ctx.res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': 'public, max-age=3600' });
-    ctx.res.end(stylesheet);
+  router.get('/static/:file', (ctx) => {
+    const name = ctx.params.file;
+    if (!Object.hasOwn(ASSETS, name) || !assets[name]) throw new HttpError(404, 'Fichier introuvable.');
+    ctx.res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': ASSETS[name][1], 'Cache-Control': 'public, max-age=3600' });
+    ctx.res.end(assets[name]);
   });
 
   router.get('/connexion', (ctx) => {
