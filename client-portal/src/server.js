@@ -1,16 +1,24 @@
 import { createServer } from 'node:http';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { openDb } from './db.js';
+import { SchemaError, openDb } from './db.js';
 import { createApp } from './app.js';
 
 const dbFile = resolve(process.env.DATABASE_FILE ?? 'data/portail.db');
 mkdirSync(dirname(dbFile), { recursive: true });
-const db = openDb(dbFile);
+let db;
+try {
+  db = openDb(dbFile);
+} catch (error) {
+  if (!(error instanceof SchemaError)) throw error;
+  console.error(`Base de données ${dbFile} : ${error.message}`);
+  process.exit(1);
+}
 
 const app = createApp({
   db,
   siteName: process.env.SITE_NAME ?? 'Espace client',
+  ...(process.env.DOCUMENTS_HINT ? { documentsHint: process.env.DOCUMENTS_HINT } : {}),
   secureCookies: process.env.COOKIE_SECURE !== '0' && process.env.NODE_ENV === 'production',
   trustProxy: process.env.TRUST_PROXY === '1',
   currency: process.env.CURRENCY ?? 'TND',

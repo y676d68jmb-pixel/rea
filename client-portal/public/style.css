@@ -78,11 +78,15 @@ form.inline { display: inline; }
 .flash-error { background: var(--danger-bg); color: var(--danger); }
 .flash-info { background: var(--info-bg); color: var(--info); }
 
-.badge { display: inline-block; padding: .1rem .55rem; border-radius: 999px; font-size: .8rem; font-weight: 600; background: var(--neutral-bg); color: var(--neutral); white-space: nowrap; }
-.badge-en_cours, .badge-ouvert, .badge-a_payer { background: var(--info-bg); color: var(--info); }
-.badge-termine, .badge-terminee, .badge-payee { background: var(--success-bg); color: var(--success); }
-.badge-attente_client, .badge-nouvelle, .badge-prio-haute { background: var(--warn-bg); color: var(--warn); }
-.badge-en_retard, .badge-refusee { background: var(--danger-bg); color: var(--danger); }
+.badge { display: inline-block; padding: .1rem .55rem; border-radius: 999px; font-size: .8rem; font-weight: 600; background: var(--neutral-bg); color: var(--neutral); white-space: nowrap; vertical-align: middle; }
+/* Info: in progress or waiting on someone else. */
+.badge-dir-import, .badge-inv-a_payer, .badge-task-en_cours, .badge-doc-envoye, .badge-doc-recu, .badge-ct-depose { background: var(--info-bg); color: var(--info); }
+/* Success: done or favourable. */
+.badge-dir-export, .badge-inv-payee, .badge-task-terminee, .badge-doc-valide, .badge-doc-remis, .badge-circuit-vert, .badge-ct-amc, .badge-account-actif { background: var(--success-bg); color: var(--success); }
+/* Warning: needs attention. */
+.badge-hold-attente_client, .badge-hold-attente_paiement, .badge-task-nouvelle, .badge-prio-haute, .badge-doc-a_fournir, .badge-circuit-orange, .badge-ct-ape, .badge-ct-prelevement { background: var(--warn-bg); color: var(--warn); }
+/* Danger: blocked, late or refused. */
+.badge-hold-bloque, .badge-hold-litige, .badge-hold-infraction, .badge-inv-en_retard, .badge-task-refusee, .badge-doc-a_corriger, .badge-circuit-rouge, .badge-ct-refus, .badge-account-inactif { background: var(--danger-bg); color: var(--danger); }
 
 .progress { display: flex; align-items: center; gap: .6rem; margin: .6rem 0; }
 .progress progress { flex: 1; height: .6rem; appearance: none; border: 0; border-radius: 999px; overflow: hidden; background: var(--neutral-bg); }
@@ -113,3 +117,64 @@ td select, .task form.row select { width: auto; }
 .muted { color: var(--muted); }
 .empty { color: var(--muted); font-style: italic; }
 .pre { white-space: pre-wrap; }
+
+/* ---------- Customs files ---------- */
+.topbar nav a[aria-current] { font-weight: 700; text-decoration: underline; text-underline-offset: .3em; }
+.card-head { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
+.stage-name { font-weight: 700; margin: .4rem 0 0; }
+.status { margin: .3rem 0; font-size: .92rem; }
+.status-todo { color: var(--warn); font-weight: 600; }
+.waiting { margin: .3rem 0; color: var(--muted); font-size: .92rem; }
+.waiting strong { color: var(--text); }
+.late { color: var(--danger); }
+.ok { color: var(--success); }
+.hint { color: var(--muted); font-size: .88rem; margin: .6rem 0 0; }
+.all-good { background: var(--success-bg); color: var(--success); padding: .7rem 1rem; border-radius: 8px; }
+.card.attention { border-color: var(--warn); }
+.card > h2:first-child, .card.attention h2 { margin-top: 0; }
+.amount { font-size: 1.5rem; font-weight: 700; margin: .5rem 0; }
+a.button { display: inline-block; font-weight: 600; padding: .55rem 1rem; border-radius: 6px; background: var(--accent); color: var(--accent-text); text-decoration: none; }
+a.button.secondary, button.secondary { background: var(--neutral-bg); color: var(--text); }
+a.button.small { padding: .35rem .7rem; font-size: .9rem; }
+
+.banner { display: flex; flex-direction: column; gap: .2rem; padding: .7rem 1rem; border-radius: 8px; margin: .6rem 0; background: var(--warn-bg); color: var(--warn); }
+.banner small { color: inherit; opacity: .9; }
+.banner-hold-bloque, .banner-hold-litige, .banner-hold-infraction, .banner-danger { background: var(--danger-bg); color: var(--danger); }
+.banner-hold-annule { background: var(--neutral-bg); color: var(--neutral); }
+
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: .1rem; }
+.step { display: flex; justify-content: space-between; gap: 1rem; padding: .45rem .8rem .45rem 2rem; position: relative; border-radius: 6px; }
+.step::before { content: ""; position: absolute; left: .7rem; top: .85rem; width: .65rem; height: .65rem; border-radius: 50%; border: 2px solid var(--border); background: var(--surface); }
+.step-done { color: var(--muted); }
+.step-done::before { background: var(--success); border-color: var(--success); }
+.step-current { background: var(--info-bg); color: var(--info); font-weight: 700; }
+.step-current::before { background: var(--accent); border-color: var(--accent); }
+.step-todo { color: var(--muted); }
+.step-date { font-size: .82rem; white-space: nowrap; font-weight: 400; }
+
+.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .6rem 1.2rem; margin: .5rem 0 1rem; }
+.facts div { min-width: 0; }
+.facts dt { font-size: .8rem; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.facts dd { margin: .1rem 0 0; overflow-wrap: anywhere; }
+
+.todo, .docs { list-style: none; margin: 0; padding: 0; display: grid; gap: .6rem; }
+.todo-item, .doc { display: flex; flex-wrap: wrap; gap: .6rem 1rem; align-items: center; justify-content: space-between; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: .7rem 1rem; }
+.todo-main, .doc-main { flex: 1 1 240px; min-width: 0; display: flex; flex-direction: column; gap: .2rem; }
+.doc-main { flex-direction: row; flex-wrap: wrap; align-items: center; gap: .4rem .6rem; }
+.doc-main p, .todo-main p { margin: 0; width: 100%; }
+.doc form.row { flex: 1 1 100%; margin: 0; }
+.doc form.row input[name="note"] { flex: 2 1 200px; width: auto; }
+.doc form.row input[type="date"] { flex: 0 1 160px; width: auto; }
+.doc select, .todo-item select { width: auto; }
+.inline-action { margin: 0; }
+
+table.invoice td:first-child { width: 100%; }
+table.invoice tr.section th { text-transform: none; font-size: .95rem; color: var(--text); letter-spacing: 0; padding-top: 1rem; }
+table.invoice tr.subtotal td { font-weight: 600; }
+table.invoice tr.grand td { font-weight: 700; font-size: 1.1rem; border-top: 2px solid var(--text); }
+fieldset.line { border: 1px solid var(--border); border-radius: 8px; padding: .4rem .9rem .8rem; margin: 0; }
+fieldset.line legend { font-weight: 600; font-size: .9rem; padding: 0 .3rem; }
+label.check { flex-direction: row; align-items: center; gap: .5rem; font-weight: 400; }
+label.check input { width: auto; }
+details > summary { cursor: pointer; font-weight: 600; color: var(--accent); }
+details[open] > summary { margin-bottom: .8rem; }
