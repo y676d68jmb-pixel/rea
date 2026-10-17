@@ -87,4 +87,12 @@ export class LoginLimiter {
   reset(key) {
     this.failures.delete(key);
   }
+
+  /** Gives back the most recent attempt (used when an attempt reserved in advance succeeds). */
+  undo(key) {
+    const list = this.failures.get(key);
+    if (!list) return;
+    list.pop();
+    if (!list.length) this.failures.delete(key);
+  }
 }

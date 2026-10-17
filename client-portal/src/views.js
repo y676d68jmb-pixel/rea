@@ -195,6 +195,11 @@ function todoList(ctx, items, back) {
           action = html`<form method="post" action="/espace/taches/${item.id}/terminer" class="inline-action">${csrfField(ctx.csrf)}${backField(back)}
             <button class="small">Marquer comme fait</button></form>`;
           break;
+        case 'hold':
+          title = html`${item.hold === 'attente_paiement' ? 'Paiement attendu' : 'Votre réponse est attendue'} : <strong>${item.hold_note}</strong>`;
+          detail = html`<p class="muted">Le dossier est arrêté tant que ce point n'est pas réglé.</p>`;
+          action = html`<a class="button small secondary" href="/espace/dossiers/${item.dossier_id}">Voir le dossier</a>`;
+          break;
         case 'invoice':
           title = html`${item.invoice_kind === 'provision' ? 'Provision' : 'Facture'} n° ${item.number} à régler : <strong>${ctx.f.money(item.amount_minor)}</strong>`;
           action = html`<a class="button small secondary" href="/espace/factures/${item.id}">Voir</a>`;
@@ -533,7 +538,7 @@ function totalsTable(ctx, totals, lines, deductions = []) {
       ${totals.stamp_minor ? html`<tr><td>Timbre fiscal</td><td class="num">${money(totals.stamp_minor)}</td></tr>` : ''}
       ${totals.deduction_minor
         ? html`<tr><td>Total</td><td class="num">${money(totals.gross_minor)}</td></tr>
-            ${deductions.map((p) => html`<tr><td>Provision déjà versée n° ${p.number}</td><td class="num">− ${money(p.amount_minor)}</td></tr>`)}`
+            ${deductions.map((p) => html`<tr><td>Provision déjà versée n° ${p.provision_number ?? p.number}</td><td class="num">− ${money(p.amount_minor)}</td></tr>`)}`
         : ''}
       <tr class="grand"><td>Net à payer</td><td class="num">${money(totals.net_minor)}</td></tr>
     </tbody>
@@ -666,8 +671,9 @@ export function adminTasksPage(ctx, { tasks, documents }) {
               <small class="muted"><a href="/admin/dossiers/${doc.dossier_id}">${doc.reference}</a> · ${doc.client_name} · signalé le ${ctx.f.dateTime(doc.updated_at)}</small>
             </div>
             <form method="post" action="/admin/documents/${doc.id}" class="row">${csrfField(ctx.csrf)}${backField(back)}
+              <input type="hidden" name="prev_status" value="${doc.status}">
               ${selectInput('status', [{ key: 'recu', label: 'Reçu, en vérification' }, { key: 'valide', label: 'Reçu et validé' }, { key: 'a_corriger', label: 'À corriger' }, { key: 'a_fournir', label: 'Pas reçu' }], 'valide')}
-              <input name="note" maxlength="500" placeholder="Consigne (obligatoire si à corriger)">
+              <input name="note" value="${doc.note}" maxlength="500" placeholder="Consigne (obligatoire si à corriger)" aria-label="Consigne">
               <button class="small">OK</button></form>
           </li>`,
         )}</ul>`}
@@ -766,6 +772,7 @@ function adminDocumentRow(ctx, doc, back) {
       ${badge('doc', doc.status, LABELS.docStatus[doc.status])}
     </div>
     <form method="post" action="/admin/documents/${doc.id}" class="row">${csrfField(ctx.csrf)}${backField(back)}
+      <input type="hidden" name="prev_status" value="${doc.status}">
       ${selectInput('status', statuses, doc.status)}
       <input type="date" name="due_on" value="${doc.due_on ?? ''}" aria-label="Échéance">
       <input name="note" value="${doc.note}" maxlength="500" placeholder="Consigne visible par le client" aria-label="Consigne">

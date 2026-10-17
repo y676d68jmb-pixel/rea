@@ -1,104 +1,22 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
-import { openDb } from '../src/db.js';
-import { createApp } from '../src/app.js';
-import { hashPassword } from '../src/security.js';
+import { Browser, createClient as makeClient, signInClient as signIn, startPortal } from './helpers.js';
 
-/** Tiny browser: keeps the session cookie and reads the CSRF token from pages. */
-class Browser {
-  constructor(base) {
-    this.base = base;
-    this.cookie = '';
-    this.csrf = '';
-  }
-
-  async request(path, { method = 'GET', form, headers = {} } = {}) {
-    const res = await fetch(this.base + path, {
-      method,
-      redirect: 'manual',
-      headers: {
-        ...(this.cookie ? { cookie: this.cookie } : {}),
-        ...(form ? { 'content-type': 'application/x-www-form-urlencoded' } : {}),
-        ...headers,
-      },
-      body: form ? new URLSearchParams(form).toString() : undefined,
-    });
-    const setCookie = res.headers.get('set-cookie');
-    if (setCookie) {
-      const pair = setCookie.split(';')[0];
-      this.cookie = pair.endsWith('=') ? '' : pair;
-    }
-    const body = await res.text();
-    const token = /name="_csrf" value="([^"]+)"/.exec(body);
-    if (token) this.csrf = token[1];
-    return { status: res.status, location: res.headers.get('location'), body };
-  }
-
-  get(path) {
-    return this.request(path);
-  }
-
-  post(path, form = {}, options = {}) {
-    return this.request(path, { method: 'POST', form: { _csrf: this.csrf, ...form }, ...options });
-  }
-
-  async follow(response) {
-    assert.equal(response.status, 303, `expected redirect, got ${response.status}: ${response.body.slice(0, 400)}`);
-    return this.get(response.location);
-  }
-
-  async login(login, password) {
-    await this.get('/connexion');
-    const res = await this.post('/connexion', { login, password });
-    let next = res;
-    while (next.status === 303) next = await this.get(next.location);
-    return res;
-  }
-}
-
-let server;
-let base;
-let db;
 const clock = { now: new Date('2026-10-17T09:00:00Z') };
+let portal;
+let base;
+let one;
+let all;
 
 before(async () => {
-  db = openDb(':memory:');
-  db.prepare("INSERT INTO users (login, password_hash, role, name, must_change_password, created_at) VALUES ('admin', ?, 'admin', 'Cabinet', 0, ?)").run(
-    await hashPassword('admin-password-1'),
-    clock.now.toISOString(),
-  );
-  server = createServer(createApp({ db, siteName: 'Portail test', now: () => clock.now }));
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  base = `http://127.0.0.1:${server.address().port}`;
+  portal = await startPortal(clock);
+  ({ base, one, all } = portal);
 });
 
-after(() => {
-  server.close();
-  db.close();
-});
+after(() => portal.close());
 
-const one = (sql, ...params) => db.prepare(sql).get(...params);
-const all = (sql, ...params) => db.prepare(sql).all(...params);
-
-async function createClient(admin, name) {
-  const page = await admin.follow(await admin.post('/admin/clients', { name, company: `${name} SARL`, email: '', phone: '' }));
-  const m = /Identifiant : (CL-\d{4}) — mot de passe provisoire : (\w+)/.exec(page.body);
-  assert.ok(m, 'credentials shown once after creation');
-  const clientId = one('SELECT id FROM users WHERE login = ?', m[1]).id;
-  return { login: m[1], password: m[2], clientId };
-}
-
-async function signInClient(client) {
-  const browser = new Browser(base);
-  const res = await browser.login(client.login, client.password);
-  if (res.location === '/mot-de-passe') {
-    const next = `${client.login}-new-password`;
-    await browser.post('/mot-de-passe', { current: client.password, next, confirm: next });
-    client.password = next;
-  }
-  return browser;
-}
+const createClient = (admin, name) => makeClient(portal, admin, name);
+const signInClient = (client) => signIn(portal, client);
 
 describe('portail de dédouanement', () => {
   let admin;
@@ -339,10 +257,14 @@ describe('portail de dédouanement', () => {
     assert.equal(invoice.amount_minor, 1_058_000); // 300 + 57 TVA + 1200 + 1 timbre − 500
     assert.equal(one('SELECT deducted_in FROM invoices WHERE id = ?', provision.id).deducted_in, invoice.id);
 
-    // Same provision cannot be used twice, even with a forged checkbox.
+    // Same provision cannot be used twice, even with a forged checkbox: the form says so.
     const again = await admin.post(`${back}/factures`, { ...lines, number: 'F-002', action: 'emettre' });
+    assert.equal(again.status, 400);
+    assert.match(again.body, /La provision n° P-001 n&#39;est plus disponible/);
+    const withoutProvision = { ...lines, number: 'F-002', action: 'emettre' };
+    delete withoutProvision[`deduct_${provision.id}`];
+    await admin.post(`${back}/factures`, withoutProvision);
     assert.equal(one("SELECT amount_minor FROM invoices WHERE number = 'F-002'").amount_minor, 1_558_000);
-    assert.equal(again.status, 303);
 
     const page = await aliceBrowser.get(`/espace/factures/${invoice.id}`);
     assert.match(page.body, /Prestations du cabinet/);

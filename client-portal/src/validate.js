@@ -8,6 +8,18 @@ export function text(form, key, { max = 200, required = false, label = key } = {
   return value;
 }
 
+/**
+ * A reference or number typed by the firm (dossier, invoice). Limited to unaccented letters so that
+ * duplicates are detected regardless of case (SQLite NOCASE only folds A-Z).
+ */
+export function code(form, key, { max = 50, required = true, label = key } = {}) {
+  const value = text(form, key, { max, required, label });
+  if (value && !/^[A-Za-z0-9][A-Za-z0-9 ._/-]*$/.test(value)) {
+    throw new HttpError(400, `« ${label} » : utilisez seulement des lettres sans accent, des chiffres, des espaces et . _ / -`);
+  }
+  return value;
+}
+
 /** A key of the label map, or null when empty and optional. */
 export function oneOf(form, key, labels, { required = true, label = key } = {}) {
   const value = String(form[key] ?? '');

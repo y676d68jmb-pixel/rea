@@ -43,6 +43,7 @@ export function createApp({
   const nowIso = () => now().toISOString();
   const loginLimiter = new LoginLimiter({ maxAttempts: 5, now: () => now().getTime() });
   const ipLimiter = new LoginLimiter({ maxAttempts: 30, now: () => now().getTime() });
+  const passwordLimiter = new LoginLimiter({ maxAttempts: 5, now: () => now().getTime() });
   const router = new Router();
   const q = createQueries(db);
 
@@ -129,14 +130,14 @@ export function createApp({
     if (loginLimiter.isBlocked(key) || ipLimiter.isBlocked(ctx.ip)) {
       return render(ctx, 'loginPage', { login, error: 'Trop de tentatives. Réessayez dans 15 minutes.' }, 429);
     }
+    // Count the attempt before the slow password check, so simultaneous guesses cannot all slip through.
+    loginLimiter.fail(key);
+    ipLimiter.fail(ctx.ip);
     const user = login ? q.userByLogin.get(login) : undefined;
     const ok = user && user.active ? await verifyPassword(password, user.password_hash) : (await burnPasswordCheck(password), false);
-    if (!ok) {
-      loginLimiter.fail(key);
-      ipLimiter.fail(ctx.ip);
-      return render(ctx, 'loginPage', { login, error: 'Identifiant ou mot de passe incorrect.' }, 401);
-    }
+    if (!ok) return render(ctx, 'loginPage', { login, error: 'Identifiant ou mot de passe incorrect.' }, 401);
     loginLimiter.reset(key);
+    ipLimiter.undo(ctx.ip);
     if (ctx.session) q.deleteSession.run(ctx.session.token_hash);
     startSession(ctx.res, user.id);
     redirect(ctx.res, user.must_change_password ? '/mot-de-passe' : '/');
@@ -154,7 +155,13 @@ export function createApp({
     const { current = '', next = '', confirm = '' } = ctx.form;
     const fail = (error) => render(ctx, 'changePasswordPage', { error }, 400);
     const user = q.userById.get(ctx.user.id);
+    const key = `user:${user.id}`;
+    if (passwordLimiter.isBlocked(key)) {
+      return render(ctx, 'changePasswordPage', { error: 'Trop de tentatives. Réessayez dans 15 minutes.' }, 429);
+    }
+    passwordLimiter.fail(key);
     if (!(await verifyPassword(current, user.password_hash))) return fail('Le mot de passe actuel est incorrect.');
+    passwordLimiter.reset(key);
     if (next.length < MIN_PASSWORD_LENGTH) return fail(`Le nouveau mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères.`);
     if (next.length > 200) return fail('Le nouveau mot de passe est trop long.');
     if (next !== confirm) return fail('Les deux mots de passe ne correspondent pas.');

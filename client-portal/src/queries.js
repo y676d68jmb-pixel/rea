@@ -5,8 +5,9 @@
 import { DOC_CLIENT_TODO, OPEN_DOSSIER_SQL } from './format.js';
 
 const TODO_STATUSES = DOC_CLIENT_TODO.map((s) => `'${s}'`).join(', ');
-const MISSING_DOCS_SQL = `(SELECT COUNT(*) FROM dossier_documents x
-  WHERE x.dossier_id = d.id AND x.responsible = 'client' AND x.status IN (${TODO_STATUSES}))`;
+// Documents the client still has to send; a closed dossier asks for nothing.
+const MISSING_DOCS_SQL = `(CASE WHEN ${OPEN_DOSSIER_SQL} THEN (SELECT COUNT(*) FROM dossier_documents x
+  WHERE x.dossier_id = d.id AND x.responsible = 'client' AND x.status IN (${TODO_STATUSES})) ELSE 0 END)`;
 const TO_CHECK_SQL = `(SELECT COUNT(*) FROM dossier_documents x WHERE x.dossier_id = d.id AND x.status = 'envoye')`;
 
 // Client order: files that need the client first, then other open files, then closed ones.
@@ -86,7 +87,7 @@ export function createQueries(db) {
     clientInvoice: st('SELECT i.*, d.reference FROM invoices i LEFT JOIN dossiers d ON d.id = i.dossier_id WHERE i.id = ? AND i.client_id = ?'),
     invoiceByNumber: st('SELECT id FROM invoices WHERE number = ? COLLATE NOCASE'),
     invoiceLines: st('SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY position, id'),
-    deductedProvisions: st("SELECT * FROM invoices WHERE deducted_in = ? AND kind = 'provision' ORDER BY id"),
+    invoiceDeductions: st('SELECT * FROM invoice_deductions WHERE invoice_id = ? ORDER BY id'),
     availableProvisions: st(
       "SELECT * FROM invoices WHERE client_id = ? AND kind = 'provision' AND status = 'payee' AND deducted_in IS NULL ORDER BY issued_on, id",
     ),
@@ -124,7 +125,12 @@ export function createQueries(db) {
     todoTasks: st(
       `SELECT t.id, t.title, t.description, t.status, t.due_on, t.dossier_id, d.reference FROM tasks t
        LEFT JOIN dossiers d ON d.id = t.dossier_id
-       WHERE t.client_id = ? AND t.assignee = 'client' AND t.status IN ('nouvelle', 'en_cours')`,
+       WHERE t.client_id = ? AND t.assignee = 'client' AND t.status IN ('nouvelle', 'en_cours')
+         AND (t.dossier_id IS NULL OR ${OPEN_DOSSIER_SQL})`,
+    ),
+    todoHolds: st(
+      `SELECT d.id AS dossier_id, d.reference, d.hold, d.hold_note FROM dossiers d
+       WHERE d.client_id = ? AND d.hold IN ('attente_client', 'attente_paiement') AND ${OPEN_DOSSIER_SQL}`,
     ),
     todoInvoices: st(
       `SELECT i.id, i.kind AS invoice_kind, i.number, i.amount_minor, i.due_on, i.dossier_id, d.reference FROM invoices i
@@ -133,23 +139,26 @@ export function createQueries(db) {
     ),
     todoDuties: st(
       `SELECT d.id AS dossier_id, d.reference, d.duties_minor, d.duties_due_on FROM dossiers d
-       WHERE d.client_id = ? AND d.duties_payer = 'client' AND d.duties_minor IS NOT NULL
+       WHERE d.client_id = ? AND d.duties_payer = 'client' AND d.duties_minor > 0
          AND d.duties_paid_on IS NULL AND ${OPEN_DOSSIER_SQL}`,
     ),
   };
 
   /**
-   * Everything the client must do, most urgent first: documents to send, tasks the firm asked for,
-   * invoices due within 7 days or overdue, and customs duties the client pays directly.
+   * Everything the client must do, most urgent first: dossiers waiting on the client, documents to send,
+   * tasks the firm asked for, invoices due within 7 days or overdue, and customs duties the client pays.
    */
   function clientTodo(clientId, f) {
     const items = [
+      ...s.todoHolds.all(clientId).map((r) => ({ kind: 'hold', ...r, due_on: null })),
       ...s.todoDocuments.all(clientId).map((r) => ({ kind: 'document', ...r })),
       ...s.todoTasks.all(clientId).map((r) => ({ kind: 'task', ...r })),
       ...s.todoInvoices.all(clientId, f.dayFromToday(7)).map((r) => ({ kind: 'invoice', ...r })),
       ...s.todoDuties.all(clientId).map((r) => ({ kind: 'duties', ...r, due_on: r.duties_due_on })),
     ];
     return items.sort((a, b) => {
+      // A dossier stopped on the client comes first, whatever the dates.
+      if ((a.kind === 'hold') !== (b.kind === 'hold')) return a.kind === 'hold' ? -1 : 1;
       if (a.due_on && b.due_on) return a.due_on < b.due_on ? -1 : a.due_on > b.due_on ? 1 : 0;
       return a.due_on ? -1 : b.due_on ? 1 : 0;
     });

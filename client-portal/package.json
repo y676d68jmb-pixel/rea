@@ -2,7 +2,7 @@
   "name": "client-portal",
   "version": "1.0.0",
   "private": true,
-  "description": "Espace client : suivi des dossiers, factures, tâches et historique.",
+  "description": "Portail client d’un cabinet de dédouanement : dossiers import et export, documents, factures et historique.",
   "type": "module",
   "engines": {
     "node": ">=22.13"

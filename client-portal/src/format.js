@@ -360,7 +360,7 @@ export function waitingOn(dossier, missingDocs = 0) {
   }
   if (dossier.stage === 'termine') return null;
   if (missingDocs > 0) return 'client';
-  if (dossier.stage === 'droits' && dossier.duties_payer === 'client' && !dossier.duties_paid_on) return 'client';
+  if (dossier.stage === 'droits' && dossier.duties_payer === 'client' && dossier.duties_minor > 0 && !dossier.duties_paid_on) return 'client';
   return byKey(STAGES, dossier.stage)?.waiting ?? null;
 }
 

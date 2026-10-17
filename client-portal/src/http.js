@@ -63,9 +63,13 @@ export class Router {
       pathMatched = true;
       if (route.method !== method) continue;
       const params = {};
-      route.keys.forEach((key, i) => {
-        params[key] = decodeURIComponent(m[i + 1]);
-      });
+      try {
+        route.keys.forEach((key, i) => {
+          params[key] = decodeURIComponent(m[i + 1]);
+        });
+      } catch {
+        return null; // malformed percent-encoding: no such page
+      }
       return { handler: route.handler, params };
     }
     return pathMatched ? { methodNotAllowed: true } : null;

@@ -118,11 +118,16 @@ export function registerClientRoutes({ db, q, f, router, flash, render, redirect
   router.get('/espace/historique', (ctx) => render(ctx, 'clientHistoryPage', { events: q.clientEvents.all(ctx.user.id, 500) }));
 }
 
-/** Lines, deducted provisions and totals of a stored invoice (lines are fixed once issued). */
+/**
+ * Lines, deducted provisions and totals of a stored invoice. Lines and deductions are fixed once issued,
+ * so the totals shown always match the stored amount, even after a cancellation.
+ */
 export function invoiceDetail(q, invoice) {
   const lines = q.invoiceLines.all(invoice.id);
-  const deductions = q.deductedProvisions.all(invoice.id);
+  const deductions = q.invoiceDeductions.all(invoice.id);
   const deductionMinor = deductions.reduce((sum, p) => sum + p.amount_minor, 0);
   const totals = lines.length ? computeInvoiceTotals(lines, invoice.stamp_minor, deductionMinor) : null;
-  return { invoice, lines, deductions, totals };
+  // A provision is only ever deducted on an invoice of the same client.
+  const deductedIn = invoice.deducted_in ? q.invoice.get(invoice.deducted_in) : null;
+  return { invoice, lines, deductions, totals, deductedIn };
 }

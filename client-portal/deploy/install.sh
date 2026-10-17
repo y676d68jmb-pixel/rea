@@ -44,7 +44,8 @@ Ce script va :
   3. créer le service « portail-client », démarré automatiquement avec le serveur ;
   4. remplacer $CADDYFILE pour servir https://$DOMAIN
      (l'ancien fichier est sauvegardé à côté s'il est différent) ;
-  5. programmer une sauvegarde quotidienne de la base (14 jours) dans $BACKUP_DIR ;
+  5. programmer une sauvegarde quotidienne de la base (14 jours) dans $BACKUP_DIR,
+     et, lors d'une mise à jour, sauvegarder la base avant de redémarrer le site ;
   6. lors de la première installation, créer le compte administrateur « admin ».
 
 EOF
@@ -117,6 +118,8 @@ DATABASE_FILE=$DATA_DIR/portail.db
 SITE_NAME="$SITE_NAME"
 CURRENCY=TND
 TIME_ZONE=Africa/Tunis
+# Phrase affichée au client sous la liste des documents à fournir :
+DOCUMENTS_HINT="Transmettez vos documents au cabinet par e-mail ou déposez-les au bureau, en indiquant la référence du dossier."
 EOF
   chmod 644 "$ENV_FILE"
 fi
@@ -191,6 +194,11 @@ EOF
 
 systemctl daemon-reload
 systemctl enable --quiet portail-client portail-client-backup.timer
+if [[ -f $DATA_DIR/portail.db ]] && systemctl is-active --quiet portail-client; then
+  echo "→ Sauvegarde de la base avant la mise à jour"
+  (cd / && runuser -u "$APP_USER" -- env DATABASE_FILE="$DATA_DIR/portail.db" \
+    "$NODE_BIN" --disable-warning=ExperimentalWarning "$APP_DIR/scripts/backup.js" "$BACKUP_DIR" 14)
+fi
 systemctl restart portail-client
 systemctl start portail-client-backup.timer
 

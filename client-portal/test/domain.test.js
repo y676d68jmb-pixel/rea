@@ -66,7 +66,7 @@ describe('dossier rules', () => {
   });
 
   test('a hold decides who the dossier waits on, then missing documents, then duties', () => {
-    const base = { stage: 'controle', hold: null, duties_payer: null, duties_paid_on: null };
+    const base = { stage: 'controle', hold: null, duties_minor: 100, duties_payer: null, duties_paid_on: null };
     assert.equal(waitingOn(base), 'douane');
     assert.equal(waitingOn(base, 2), 'client');
     assert.equal(waitingOn({ ...base, hold: 'attente_paiement' }), 'client');
@@ -75,6 +75,7 @@ describe('dossier rules', () => {
     assert.equal(waitingOn({ ...base, stage: 'droits', duties_payer: 'client' }), 'client');
     assert.equal(waitingOn({ ...base, stage: 'droits', duties_payer: 'client', duties_paid_on: '2026-10-01' }), 'cabinet');
     assert.equal(waitingOn({ ...base, stage: 'termine' }, 3), null);
+    assert.equal(waitingOn({ ...base, stage: 'droits', duties_payer: 'client', duties_minor: 0 }), 'cabinet', 'nothing to pay');
   });
 
   test('a cancelled dossier has no progress bar and counts as closed', () => {

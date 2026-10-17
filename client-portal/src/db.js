@@ -122,6 +122,16 @@ CREATE TABLE invoice_lines (
   receipt_ref TEXT NOT NULL DEFAULT ''
 );
 
+-- Provisions deducted on an invoice, kept even if the invoice is later cancelled
+-- (invoices.deducted_in only says whether a provision is still available).
+CREATE TABLE invoice_deductions (
+  id INTEGER PRIMARY KEY,
+  invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+  provision_id INTEGER REFERENCES invoices(id) ON DELETE SET NULL,
+  provision_number TEXT NOT NULL,
+  amount_minor INTEGER NOT NULL CHECK (amount_minor >= 0)
+);
+
 CREATE TABLE tasks (
   id INTEGER PRIMARY KEY,
   client_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -153,6 +163,7 @@ CREATE INDEX idx_dossier_stages ON dossier_stages(dossier_id);
 CREATE INDEX idx_documents_dossier ON dossier_documents(dossier_id);
 CREATE INDEX idx_invoices_client ON invoices(client_id);
 CREATE INDEX idx_invoice_lines ON invoice_lines(invoice_id);
+CREATE INDEX idx_invoice_deductions ON invoice_deductions(invoice_id);
 CREATE INDEX idx_tasks_client ON tasks(client_id);
 CREATE INDEX idx_events_client ON events(client_id, created_at);
 CREATE INDEX idx_events_dossier ON events(dossier_id, created_at);

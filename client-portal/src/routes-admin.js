@@ -15,7 +15,7 @@ import {
 import { HttpError } from './http.js';
 import { invoiceDetail } from './routes-client.js';
 import { generatePassword, hashPassword } from './security.js';
-import { checkbox, day, idParam, money, oneOf, text } from './validate.js';
+import { checkbox, code, day, idParam, money, oneOf, text } from './validate.js';
 
 export const MAX_INVOICE_LINES = 8;
 
@@ -112,6 +112,13 @@ export function registerAdminRoutes({ db, q, f, router, flash, render, redirect,
     }
   }
 
+  /** A dossier has started once it went past opening or a document was acted on. */
+  function hasStarted(dossier) {
+    const history = q.dossierStages.all(dossier.id);
+    if (history.some((row) => row.stage !== 'ouverture')) return true;
+    return q.dossierDocuments.all(dossier.id).some((doc) => !['a_fournir', 'a_venir'].includes(doc.status));
+  }
+
   const touch = (dossierId) => db.prepare('UPDATE dossiers SET updated_at = ? WHERE id = ?').run(nowIso(), dossierId);
 
   // ---------- Overview pages ----------
@@ -184,7 +191,7 @@ export function registerAdminRoutes({ db, q, f, router, flash, render, redirect,
     const client = clientOf(idParam(ctx.params.id));
     ctx.back = `/admin/clients/${client.id}`;
     const direction = oneOf(ctx.form, 'direction', LABELS.direction, { label: 'Sens' });
-    const reference = text(ctx.form, 'reference', { required: true, max: 50, label: 'Référence' });
+    const reference = code(ctx.form, 'reference', { label: 'Référence' });
     const title = text(ctx.form, 'title', { required: true, label: 'Marchandise' });
     const clientReference = text(ctx.form, 'client_reference', { max: 100, label: 'Référence du client' });
     const description = text(ctx.form, 'description', { max: 5000 });
@@ -271,6 +278,9 @@ export function registerAdminRoutes({ db, q, f, router, flash, render, redirect,
     ctx.back = `/admin/dossiers/${dossier.id}`;
     const hold = oneOf(ctx.form, 'hold', LABELS.hold, { required: false, label: 'Situation' });
     const note = hold ? text(ctx.form, 'hold_note', { max: 500, required: true, label: 'Motif (affiché au client)' }) : '';
+    if (hold && dossier.stage === 'termine') {
+      throw new HttpError(400, 'Le dossier est terminé : revenez d’abord à une étape précédente pour signaler une situation particulière.');
+    }
     if (hold === dossier.hold && note === dossier.hold_note) {
       flash(ctx, 'info', 'Aucune modification.');
       return redirect(ctx.res, ctx.back);
@@ -299,6 +309,9 @@ export function registerAdminRoutes({ db, q, f, router, flash, render, redirect,
       visit_place: text(ctx.form, 'visit_place', { max: 200, label: 'Lieu de visite' }),
       bae_on: day(ctx.form, 'bae_on', { label: 'Date du BAE' }),
     };
+    if ((v.declaration_on && v.declaration_on > f.today()) || (v.bae_on && v.bae_on > f.today())) {
+      throw new HttpError(400, 'Les dates de déclaration et de BAE ne peuvent pas être dans le futur.');
+    }
     const parts = [];
     if ((v.declaration_number !== d.declaration_number || v.declaration_on !== d.declaration_on) && v.declaration_number) {
       parts.push(`Déclaration enregistrée sous le n° ${v.declaration_number}${v.declaration_on ? ` du ${f.date(v.declaration_on)}` : ''}`);
@@ -339,12 +352,15 @@ export function registerAdminRoutes({ db, q, f, router, flash, render, redirect,
       duties_paid_on: day(ctx.form, 'duties_paid_on', { label: 'Payés le' }),
       duties_receipt: text(ctx.form, 'duties_receipt', { max: 100, label: 'N° de quittance' }),
     };
-    if (v.duties_minor !== null && !v.duties_payer) throw new HttpError(400, 'Indiquez qui paie les droits et taxes.');
+    if (v.duties_minor > 0 && !v.duties_payer) throw new HttpError(400, 'Indiquez qui paie les droits et taxes.');
+    if (v.duties_minor === 0) Object.assign(v, { duties_payer: null, duties_due_on: null });
     if (v.duties_paid_on && v.duties_minor === null) throw new HttpError(400, 'Indiquez le montant des droits et taxes payés.');
     if (v.duties_paid_on && v.duties_paid_on > f.today()) throw new HttpError(400, 'La date de paiement ne peut pas être dans le futur.');
     const parts = [];
     if (v.duties_minor !== d.duties_minor || v.duties_payer !== d.duties_payer || v.duties_due_on !== d.duties_due_on) {
-      if (v.duties_minor !== null) {
+      if (v.duties_minor === 0) {
+        parts.push('Aucun droit ni taxe à payer pour ce dossier');
+      } else if (v.duties_minor !== null) {
         const who = v.duties_payer === 'client'
           ? `à payer par vous${v.duties_due_on ? ` avant le ${f.date(v.duties_due_on)}` : ''}`
           : 'avancés par le cabinet pour votre compte';
@@ -377,6 +393,9 @@ export function registerAdminRoutes({ db, q, f, router, flash, render, redirect,
     ctx.back = `/admin/dossiers/${d.id}`;
     const status = oneOf(ctx.form, 'ct_status', LABELS.ct, { required: false, label: 'Contrôle technique' });
     const note = text(ctx.form, 'ct_note', { max: 500, label: 'Précision' });
+    if (d.stage === 'termine' && ['depose', 'prelevement', 'ape'].includes(status)) {
+      throw new HttpError(400, 'Le dossier est terminé : revenez d’abord à une étape précédente si le contrôle technique est encore en cours.');
+    }
     if (status === d.ct_status && note === d.ct_note) {
       flash(ctx, 'info', 'Aucune modification.');
       return redirect(ctx.res, ctx.back);
@@ -394,12 +413,12 @@ export function registerAdminRoutes({ db, q, f, router, flash, render, redirect,
     const d = dossierOf(idParam(ctx.params.id));
     ctx.back = `/admin/dossiers/${d.id}`;
     const direction = oneOf(ctx.form, 'direction', LABELS.direction, { label: 'Sens' });
-    if (direction !== d.direction && d.stage !== 'ouverture') {
+    if (direction !== d.direction && hasStarted(d)) {
       throw new HttpError(400, "Le sens import/export ne peut plus changer une fois le dossier commencé.");
     }
     const { office, detail } = officeFor(ctx.form);
     const v = {
-      reference: text(ctx.form, 'reference', { required: true, max: 50, label: 'Référence' }),
+      reference: code(ctx.form, 'reference', { label: 'Référence' }),
       client_reference: text(ctx.form, 'client_reference', { max: 100 }),
       title: text(ctx.form, 'title', { required: true, label: 'Marchandise' }),
       description: text(ctx.form, 'description', { max: 5000 }),
@@ -519,9 +538,13 @@ export function registerAdminRoutes({ db, q, f, router, flash, render, redirect,
     const d = dossierOf(doc.dossier_id);
     ctx.back = adminBack(ctx.form.back, `/admin/dossiers/${d.id}`);
     const allowed = Object.fromEntries(DOC_STATUS.filter((s) => s.for.includes(doc.responsible)).map((s) => [s.key, s.label]));
+    if (ctx.form.prev_status && ctx.form.prev_status !== doc.status) {
+      throw new HttpError(400, `« ${doc.label} » vient de changer d’état (${LABELS.docStatus[doc.status]}). Vérifiez puis recommencez.`);
+    }
     const status = oneOf(ctx.form, 'status', allowed, { label: 'État' });
-    const note = text(ctx.form, 'note', { max: 500, label: 'Consigne' });
-    const dueOn = day(ctx.form, 'due_on', { label: 'Échéance' });
+    // Fields a form does not send keep their stored value.
+    const note = 'note' in ctx.form ? text(ctx.form, 'note', { max: 500, label: 'Consigne' }) : doc.note;
+    const dueOn = 'due_on' in ctx.form ? day(ctx.form, 'due_on', { label: 'Échéance' }) : doc.due_on;
     if (status === 'a_corriger' && !note) throw new HttpError(400, 'Indiquez ce qu’il faut corriger : le client verra ce message.');
     if (status === doc.status && note === doc.note && dueOn === doc.due_on) {
       flash(ctx, 'info', 'Aucune modification.');
@@ -590,7 +613,7 @@ export function registerAdminRoutes({ db, q, f, router, flash, render, redirect,
         return fallback;
       }
     };
-    const number = attempt(() => text(form, 'number', { required: true, max: 50, label: 'N° de facture' }), '');
+    const number = attempt(() => code(form, 'number', { label: 'N° de facture' }), '');
     if (number && q.invoiceByNumber.get(number)) errors.push(`Le numéro « ${number} » est déjà utilisé.`);
     const label = attempt(() => text(form, 'label', { max: 200, label: 'Objet' }), '');
     const dossierId = attempt(() => dossierFor(form, client.id));
@@ -619,7 +642,16 @@ export function registerAdminRoutes({ db, q, f, router, flash, render, redirect,
     }
     if (!lines.length && !errors.length) errors.push('Ajoutez au moins une ligne.');
 
-    const provisions = q.availableProvisions.all(client.id).filter((p) => checkbox(form, `deduct_${p.id}`));
+    const available = q.availableProvisions.all(client.id);
+    const provisions = available.filter((p) => checkbox(form, `deduct_${p.id}`));
+    for (const key of Object.keys(form)) {
+      const m = /^deduct_(\d+)$/.exec(key);
+      if (!m || !checkbox(form, key) || available.some((p) => p.id === Number(m[1]))) continue;
+      const gone = q.invoice.get(Number(m[1]));
+      errors.push(gone && gone.client_id === client.id
+        ? `La provision n° ${gone.number} n'est plus disponible (déjà déduite, annulée ou pas encore payée). Vérifiez les provisions à déduire.`
+        : 'Une provision cochée n’existe pas pour ce client.');
+    }
     const deductionMinor = provisions.reduce((sum, p) => sum + p.amount_minor, 0);
     let totals = null;
     try {
@@ -689,14 +721,18 @@ export function registerAdminRoutes({ db, q, f, router, flash, render, redirect,
           .prepare("UPDATE invoices SET deducted_in = ? WHERE id = ? AND kind = 'provision' AND status = 'payee' AND deducted_in IS NULL")
           .run(invoiceId, provision.id).changes;
         if (Number(changed) !== 1) throw new HttpError(409, `La provision n° ${provision.number} vient d'être déduite ailleurs. Rechargez la page.`);
+        db.prepare('INSERT INTO invoice_deductions (invoice_id, provision_id, provision_number, amount_minor) VALUES (?, ?, ?, ?)').run(
+          invoiceId, provision.id, provision.number, provision.amount_minor,
+        );
       }
       const summary = [
         totals.taxable_minor ? `prestations ${f.money(totals.taxable_minor)} HT` : '',
         totals.debours_minor ? `débours ${f.money(totals.debours_minor)}` : '',
         totals.deduction_minor ? `provision déduite ${f.money(totals.deduction_minor)}` : '',
       ].filter(Boolean).join(', ');
-      logEvent(client.id, invoice.dossierId, ctx.user.id,
-        `Facture n° ${invoice.number} émise : ${f.money(totals.net_minor)} à payer${summary ? ` (${summary})` : ''}, échéance le ${f.date(invoice.dueOn)}`);
+      logEvent(client.id, invoice.dossierId, ctx.user.id, paid
+        ? `Facture n° ${invoice.number} émise et réglée par les provisions déduites (${summary})`
+        : `Facture n° ${invoice.number} émise : ${f.money(totals.net_minor)} à payer${summary ? ` (${summary})` : ''}, échéance le ${f.date(invoice.dueOn)}`);
       return invoiceId;
     });
     flash(ctx, 'success', `Facture ${invoice.number} émise.`);
@@ -706,7 +742,7 @@ export function registerAdminRoutes({ db, q, f, router, flash, render, redirect,
   router.post('/admin/clients/:id/provisions', (ctx) => {
     const client = clientOf(idParam(ctx.params.id));
     ctx.back = `/admin/clients/${client.id}/factures/nouvelle`;
-    const number = text(ctx.form, 'number', { required: true, max: 50, label: 'N° de la demande' });
+    const number = code(ctx.form, 'number', { label: 'N° de la demande' });
     if (q.invoiceByNumber.get(number)) throw new HttpError(400, `Le numéro « ${number} » est déjà utilisé.`);
     const label = text(ctx.form, 'label', { max: 200, label: 'Objet' }) || 'Provision pour droits, taxes et frais';
     const dossierId = dossierFor(ctx.form, client.id);
@@ -734,11 +770,7 @@ export function registerAdminRoutes({ db, q, f, router, flash, render, redirect,
     const invoice = q.invoice.get(idParam(ctx.params.id));
     if (!invoice) throw new HttpError(404, 'Facture introuvable.');
     const detail = invoiceDetail(q, invoice);
-    render(ctx, 'invoicePage', {
-      ...detail,
-      client: q.userById.get(invoice.client_id),
-      deductedIn: invoice.deducted_in ? q.invoice.get(invoice.deducted_in) : null,
-    });
+    render(ctx, 'invoicePage', { ...detail, client: q.userById.get(invoice.client_id) });
   });
 
   router.post('/admin/factures/:id', (ctx) => {
@@ -746,8 +778,19 @@ export function registerAdminRoutes({ db, q, f, router, flash, render, redirect,
     if (!invoice) throw new HttpError(404, 'Facture introuvable.');
     ctx.back = `/admin/factures/${invoice.id}`;
     const status = oneOf(ctx.form, 'status', LABELS.invoiceStatus, { label: 'État' });
+    const kindLabel = invoice.kind === 'provision' ? 'Demande de provision' : 'Facture';
     if (status === invoice.status) {
-      flash(ctx, 'info', 'Aucune modification.');
+      const paidOn = status === 'payee' ? day(ctx.form, 'paid_on', { label: 'Payée le' }) : null;
+      if (!paidOn || paidOn === invoice.paid_on) {
+        flash(ctx, 'info', 'Aucune modification.');
+        return redirect(ctx.res, ctx.back);
+      }
+      if (paidOn > f.today()) throw new HttpError(400, 'La date de paiement ne peut pas être dans le futur.');
+      transaction(db, () => {
+        db.prepare('UPDATE invoices SET paid_on = ? WHERE id = ?').run(paidOn, invoice.id);
+        logEvent(invoice.client_id, invoice.dossier_id, ctx.user.id, `${kindLabel} n° ${invoice.number} : date de paiement corrigée au ${f.date(paidOn)}`);
+      });
+      flash(ctx, 'success', 'Date de paiement corrigée.');
       return redirect(ctx.res, ctx.back);
     }
     if (invoice.status === 'annulee') throw new HttpError(400, 'Une facture annulée ne peut plus changer : émettez-en une nouvelle.');
@@ -757,7 +800,6 @@ export function registerAdminRoutes({ db, q, f, router, flash, render, redirect,
     }
     const paidOn = status === 'payee' ? day(ctx.form, 'paid_on', { label: 'Payée le' }) ?? f.today() : null;
     if (paidOn && paidOn > f.today()) throw new HttpError(400, 'La date de paiement ne peut pas être dans le futur.');
-    const kindLabel = invoice.kind === 'provision' ? 'Demande de provision' : 'Facture';
     transaction(db, () => {
       db.prepare('UPDATE invoices SET status = ?, paid_on = ? WHERE id = ?').run(status, paidOn, invoice.id);
       if (status === 'annulee') db.prepare('UPDATE invoices SET deducted_in = NULL WHERE deducted_in = ?').run(invoice.id);

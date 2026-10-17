@@ -1,13 +1,15 @@
-# Portail client
+# Portail client — déclarations en douane
 
-Site web où chaque client se connecte avec **son identifiant et son mot de passe** pour suivre :
+Site web où chaque client importateur ou exportateur se connecte avec **son identifiant et son mot de passe** pour suivre ses dossiers de dédouanement :
 
-- l'**état d'avancement de ses dossiers** (état + pourcentage),
-- l'**état de ses factures** (à payer, payée, en retard, annulée),
-- les **tâches** : il en dépose pour le cabinet, et il voit celles que le cabinet lui demande,
-- l'**historique complet** de ses dossiers, mis à jour automatiquement à chaque changement.
+- **Avancement de chaque dossier** import ou export, étape par étape : documents, domiciliation bancaire, arrivée ou réservation du transport, déclaration, contrôle de la douane, droits et taxes, bon à enlever (BAE), sortie du port ou embarquement, livraison.
+- **Douane** : n° de déclaration, circuit (vert, orange, rouge), date et lieu de visite, contrôle technique (AMC, APE, D41), montant des droits et taxes et qui les paie.
+- **Documents** : ce que le client doit fournir (avec un bouton « Je l'ai envoyé »), ce qui est attendu d'autres intervenants, et ce que le cabinet lui remettra (déclaration, BAE, quittance, facture visée).
+- **À faire** : une seule liste avec tout ce que le client doit faire (documents, demandes du cabinet, provisions et factures à régler, droits à payer).
+- **Factures et provisions** : honoraires et frais avec TVA, débours sans TVA avec leur justificatif, timbre fiscal, provisions déduites de la facture finale.
+- **Historique** complet, alimenté automatiquement à chaque changement.
 
-Le cabinet (administrateur) crée les comptes clients, les dossiers et les factures, met à jour l'avancement et traite les tâches.
+Le cabinet (administrateur) crée les comptes clients et les dossiers, fait avancer les étapes, vérifie les documents et émet les factures. La page **Dossiers** liste les dossiers bloqués ou en attente en premier ; la page **À traiter** regroupe les documents signalés envoyés par les clients et leurs demandes.
 
 Aucune dépendance externe : il faut seulement **Node.js 22.13 ou plus récent**. Les données sont stockées dans un fichier SQLite (`data/portail.db`).
 
@@ -33,6 +35,7 @@ Un mot de passe oublié se réinitialise depuis la fiche du client (bouton **Ré
 | `HOST`          | Adresse d'écoute                                                   | `127.0.0.1`        |
 | `DATABASE_FILE` | Fichier de la base de données                                      | `data/portail.db`  |
 | `SITE_NAME`     | Nom affiché en haut des pages                                      | `Espace client`    |
+| `DOCUMENTS_HINT` | Phrase indiquant au client comment transmettre ses documents     | e-mail ou bureau   |
 | `CURRENCY`      | Devise des factures (code ISO)                                     | `TND`              |
 | `TIME_ZONE`     | Fuseau horaire des dates                                           | `Africa/Tunis`     |
 | `NODE_ENV`      | `production` active les cookies sécurisés (HTTPS obligatoire)      | —                  |
@@ -106,6 +109,7 @@ npm test
 
 ## Pistes d'évolution
 
-- Dépôt de fichiers (pièces justificatives, factures PDF).
-- Notifications par e-mail (nouvelle facture, dossier mis à jour, tâche déposée).
+- Dépôt de fichiers dans le portail (le client envoie aujourd'hui ses documents par e-mail ou au bureau et le signale d'un clic).
+- Notifications par e-mail ou SMS (document demandé, circuit attribué, facture émise).
 - Plusieurs utilisateurs côté cabinet, avec leurs propres droits.
+- Suivi des délais de magasinage et de restitution des conteneurs.
