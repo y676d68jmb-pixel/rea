@@ -38,18 +38,55 @@ Un mot de passe oublié se réinitialise depuis la fiche du client (bouton **Ré
 | `NODE_ENV`      | `production` active les cookies sécurisés (HTTPS obligatoire)      | —                  |
 | `TRUST_PROXY`   | `1` si le site est derrière un proxy (Nginx, Caddy…)               | —                  |
 
-## Mise en ligne
+## Mise en ligne sur votre domaine (OVH)
 
-Le site doit être servi en **HTTPS**. Configuration conseillée sur un petit serveur (VPS) :
+Le site a besoin d'un petit serveur qui tourne en permanence. L'hébergement fourni avec un nom de domaine ne suffit pas : prenez un **VPS** (le plus petit modèle suffit largement).
 
-1. Lancer l'application avec `NODE_ENV=production TRUST_PROXY=1 npm start` (par exemple via un service systemd ou pm2).
-2. Mettre un proxy HTTPS devant, par exemple Caddy, qui obtient le certificat automatiquement :
-   ```
-   portail.mon-cabinet.tn {
-       reverse_proxy 127.0.0.1:3000
-   }
-   ```
-3. **Sauvegarder régulièrement** le dossier `data/`, qui contient toutes les données.
+### 1. Louer le serveur
+
+Sur [ovhcloud.com](https://www.ovhcloud.com/fr/vps/), commandez un VPS avec le système **Ubuntu 24.04**. OVH vous envoie par e-mail son **adresse IP** (par exemple `51.75.12.34`) et le mot de passe de l'utilisateur `ubuntu`.
+
+### 2. Faire pointer le domaine vers le serveur
+
+Dans l'espace client OVH : **Web Cloud → Noms de domaine → votre domaine → Zone DNS → Ajouter une entrée** :
+
+- type **A**,
+- sous-domaine **portail** (le site sera à l'adresse `portail.votre-domaine`),
+- cible : l'**adresse IP** du VPS.
+
+La prise en compte prend de quelques minutes à quelques heures.
+
+### 3. Installer le site (depuis un ordinateur)
+
+```bash
+scp portail-client.zip ubuntu@ADRESSE_IP:          # envoie le site sur le serveur
+ssh ubuntu@ADRESSE_IP                              # se connecte au serveur
+sudo apt-get install -y unzip && unzip portail-client.zip
+cd client-portal
+sudo bash deploy/install.sh portail.votre-domaine.com "Nom du cabinet"
+```
+
+Le script affiche ce qu'il va faire et demande confirmation. Il installe Node.js et Caddy (HTTPS automatique), démarre le site comme un service, programme une sauvegarde quotidienne et affiche **le mot de passe provisoire du compte `admin`**.
+
+Ouvrez ensuite `https://portail.votre-domaine.com` et connectez-vous avec `admin`.
+
+### Mettre à jour le site
+
+Recommencez l'étape 3 avec la nouvelle archive : le code est remplacé, les données et les comptes sont conservés.
+
+### Sauvegardes
+
+Une copie de la base est faite chaque nuit dans `/var/backups/portail-client` (14 jours conservés). Pour plus de sécurité, activez aussi l'option de sauvegarde automatique du VPS chez OVH, ou copiez de temps en temps ce dossier sur un autre support.
+
+Pour restaurer une sauvegarde :
+
+```bash
+sudo systemctl stop portail-client
+sudo cp /var/backups/portail-client/portail-AAAA-MM-JJ….db /var/lib/portail-client/portail.db
+sudo rm -f /var/lib/portail-client/portail.db-wal /var/lib/portail-client/portail.db-shm
+sudo chown portail:portail /var/lib/portail-client/portail.db
+sudo systemctl start portail-client
+```
 
 ## Sécurité
 

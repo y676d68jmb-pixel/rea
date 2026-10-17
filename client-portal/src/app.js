@@ -515,7 +515,8 @@ export function createApp({
 
   function clientIp(req) {
     if (trustProxy) {
-      const forwarded = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim();
+      // The last entry is the address our own proxy saw; earlier ones can be forged by the visitor.
+      const forwarded = String(req.headers['x-forwarded-for'] ?? '').split(',').at(-1).trim();
       if (forwarded) return forwarded;
     }
     return req.socket.remoteAddress ?? 'unknown';
